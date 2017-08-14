@@ -1,0 +1,9 @@
+_createArguments = fn(schema function keyFunction)
+	{ keyFunction };
+
+_blockingWithArguments = fn(schema [ * ] data, schema { keyFunction: function } parameters)
+	data -> group by key = (parameters.keyFunction)($) into { key, records: $ };
+
+blocking = fn(schema [ * ] data, schema function keyFunction)
+	data -> _blockingWithArguments(_createArguments(keyFunction));
+	

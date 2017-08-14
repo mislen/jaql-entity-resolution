@@ -1,0 +1,5 @@
+createInfo = fn(schema function method, schema { * } arguments)
+	{ method, arguments };
+
+_commonBlocking = fn(schema [ * ] data, schema function method, schema { * } parameters)
+	data -> method(parameters) -> transform $.records;

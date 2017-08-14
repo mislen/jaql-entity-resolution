@@ -1,0 +1,241 @@
+// JAQL Module
+//----------------
+
+import extensions;
+
+addClassPath("lib/similarity.jar");
+
+equalSim = fn(lhs, rhs)
+	to_double(lhs == rhs);
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~EDIT-BASED_SIMILARITIES~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+levDist = javaudf("ederigo.json.similarity.edit_based.LevenshteinDistance");
+levSim = javaudf("ederigo.json.similarity.edit_based.LevenshteinSimilarity");
+
+damLevDist = javaudf("ederigo.json.similarity.edit_based.DamerauLevenshteinDistance");
+damLevSim = javaudf("ederigo.json.similarity.edit_based.DamerauLevenshteinSimilarity");
+
+osaDist = javaudf("ederigo.json.similarity.edit_based.OptimalStringAlignmentDistance");
+osaSim = javaudf("ederigo.json.similarity.edit_based.OptimalStringAlignmentSimilarity");
+
+lcsDist = javaudf("ederigo.json.similarity.edit_based.LongestCommonSubsequenceDistance");
+lcsSim = javaudf("ederigo.json.similarity.edit_based.LongestCommonSubsequenceSimilarity");
+
+jaroSim = javaudf("ederigo.json.similarity.edit_based.JaroSimilarity");
+
+jaroWinklerSim = javaudf("ederigo.json.similarity.edit_based.JaroWinklerSimilarity");
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~TOKEN-BASED_SIMILARITIES~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~BAGS~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+nGramSplit = javaudf("ederigo.json.similarity.token_based.tokens.NGramSplit");
+
+splitIntoBag = fn(schema [ * ] array)
+	array -> group by token = $ as tokenInfo into { token, count: tokenInfo -> count() };
+
+wordBag = fn(schema string str, schema string pattern = "\\s+")
+	str -> strSplit(pattern) -> splitIntoBag();
+
+nGramBag = fn(schema string str, schema long size = 2, schema boolean isPadding = false, schema boolean isNormalized = true)
+	str -> nGramSplit(size, isPadding, isNormalized) -> splitIntoBag();
+	
+bagCount = fn(schema [ * ] tokens)
+	tokens -> transform $.count -> sum();
+	
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~TOKENS~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+updateTokensWeights = fn(schema [ * ] tokens, schema function weightFunc)
+	tokens -> transform each token { token{ * - weight}, weight: weightFunc(tokens, token) };
+
+tokensToRecord = fn(schema [ * ] tokens)
+	tokens -> transform { ($.token): $.weight } -> record();
+
+tokensNormSqr = fn(schema [ * ] tokens)
+	tokens -> transform power($.weight, 2) -> sum();
+
+tokensNorm = fn(schema [ * ] tokens)
+	tokens -> tokensNormSqr() -> power(0.5);
+
+normalizeTokens = fn(schema [ * ] tokens)
+	tokens -> updateTokensWeights(fn(tokens, token) token.weight / tokensNorm(tokens));
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~TOKENIZE_TEXT~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+normalizeText = fn(schema string text, schema function normFunc = strToLowerCase)
+	{ text, norm: text -> normFunc() };
+
+tokenizeText = fn(schema string text, schema function normFunc = strToLowerCase, schema function tokenFunc = wordBag)
+(
+	norm = text -> normFunc(),
+	{ text, norm, tokens: norm -> tokenFunc() }
+);
+
+updateTokenizedText = fn(tokenizedText, schema function tokenUpdateFunc)
+	{ tokenizedText{ * - tokens }, tokens: tokenizedText.tokens -> tokenUpdateFunc() };
+
+normalizeTokenizedText = fn(tokenizedText)
+	tokenizedText -> updateTokenizedText(normalizeTokens);
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~INTERSECTION~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+tokensIntersection = fn(schema [ * ] lhs, schema [ * ] rhs)
+	join lhs, rhs where lhs.token == rhs.token into { lhs.token, leftWeight: lhs.weight, rightWeight: rhs.weight };
+
+bagsIntersection = fn(schema [ * ] lhs, schema [ * ] rhs)
+	join lhs, rhs where lhs.token == rhs.token into { lhs.token, count: [ lhs.count, rhs.count ] -> min() };
+
+bagsIntersectionCount = fn(schema [ * ] lhs, schema [ * ] rhs, schema function countFunc)
+	bagsIntersection(lhs, rhs) -> countFunc() -> to_double();
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~GENERALIZED_SIMILARITIES~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+generalizedJaccardSim = fn(schema [ * ] lhs, schema [ * ] rhs, schema function countFunc)
+(
+	intersectionCount = bagsIntersectionCount(lhs, rhs, countFunc),
+	intersectionCount / (countFunc(lhs) + countFunc(rhs) - intersectionCount)
+);
+
+generalizedOverlapSim = fn(schema [ * ] lhs, schema [ * ] rhs, schema function countFunc)
+	bagsIntersectionCount(lhs, rhs, countFunc) / min([ countFunc(lhs), countFunc(rhs) ]);
+
+generalizedDiceSim = fn(schema [ * ] lhs, schema [ * ] rhs, schema function countFunc)
+	2.0 * bagsIntersectionCount(lhs, rhs, countFunc) / (countFunc(lhs) + countFunc(rhs));
+
+generalizedCosineSim = fn(schema [ * ] lhs, schema [ * ] rhs, schema function vectorFunc, schema boolean normalized = false)
+(
+	vector = vectorFunc(lhs, rhs),
+	if (exists(vector))
+		if (normalized)
+			to_double(sum(vector))
+		else
+			to_double(sum(vector)) / power(tokensNormSqr(lhs) * tokensNormSqr(rhs), 0.5)
+	else
+		0.0
+);
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~SIMILARITIES~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+jaccardSim = fn(schema [ * ] lhs, schema [ * ] rhs)
+	generalizedJaccardSim(lhs, rhs, count);
+
+jaccardBagSim = fn(schema [ * ] lhs, schema [ * ] rhs)
+	generalizedJaccardSim(lhs, rhs, bagCount);
+
+overlapSim = fn(schema [ * ] lhs, schema [ * ] rhs)
+	generalizedOverlapSim(lhs, rhs, count);
+
+overlapBagSim = fn(schema [ * ] lhs, schema [ * ] rhs)
+	generalizedOverlapSim(lhs, rhs, bagCount);
+
+diceSim = fn(schema [ * ] lhs, schema [ * ] rhs)
+	generalizedDiceSim(lhs, rhs, count);
+
+diceBagSim = fn(schema [ * ] lhs, schema [ * ] rhs)
+	generalizedDiceSim(lhs, rhs, bagCount);
+
+cosineSim = fn(schema [ * ] lhs, schema [ * ] rhs, schema boolean normalized = false)
+(
+	vectorFunc = fn(lhs, rhs)
+		tokensIntersection(lhs, rhs) -> transform $.leftWeight * $.rightWeight,
+	generalizedCosineSim(lhs, rhs, vectorFunc, normalized)
+);
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~TF-IDF~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~TOKEN_FREQUENCY~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+tfBasic = fn(schema double tf, schema [ * ] counts)
+	tf;
+tfLog = fn(schema double tf, schema [ * ] counts)
+	1.0 + ln(tf);
+tfUnary = fn(schema double tf, schema [ * ] counts)
+	1.0;
+tfNormal = fn(schema double tf, schema [ * ] counts)
+	tf / to_double(count(counts));
+tfAugment = fn(schema double tf, schema [ * ] counts)
+	0.5 + 0.5 * tf / max(counts);
+tfLogAve = fn(schema double tf, schema [ * ] counts)
+	(1.0 + ln(tf)) / (1.0 + ln(counts -> transform to_double($) -> avg()));
+
+countTokensTf = fn(schema [ * ] tokens, schema function tfFunc = tfNormal)
+	tokens -> updateTokensWeights(fn(tokens, token) token.count -> tfFunc(tokens -> transform $.count));
+
+countTf = fn(tokenizedText, schema function tfFunc = tfNormal)
+	updateTokenizedText(tokenizedText, fn(tokens) tokens -> countTokensTf(tfFunc));
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~INVERSE_DOCUMENT_FRECUENCY~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+idfBasic = fn(schema double df, schema double dc)
+	ln(dc / df);
+idfShift = fn(schema double df, schema double dc)
+	ln((dc + 1.0) / df);
+idfUnary = fn(schema double df, schema double dc)
+	1.0;
+idfSmooth = fn(schema double df, schema double dc)
+	ln(1.0 + dc / df);
+idfProb = fn(schema double df, schema double dc)
+	ln(max([ 1.0, (dc - df) / df ]));
+
+createTokenInfo = fn(schema [ * ] tokenizedTexts)
+	tokenizedTexts
+		-> expand unroll $.tokens
+			-> group by token = $.tokens.token as tokenInfo into { token, texts: tokenInfo[*]{ text, tokens.count } };
+
+countIdfFromTokenInfo = fn(schema [ * ] tokenInfo, schema long textCount, schema function idfFunc = idfBasic)
+	tokenInfo -> transform { $.token, weight: $.texts -> count() -> idfFunc(textCount) } -> tokensToRecord();
+
+countIdf = fn(schema [ * ] tokenizedTexts, schema function idfFunc = idfBasic)
+	tokenizedTexts -> createTokenInfo() -> countIdfFromTokenInfo(tokenizedTexts -> count(), idfFunc);
+
+idfOrDefault = fn(schema { * } idfs, schema string token, schema double default = 1.0)
+(
+	if (isdefined idfs.(token))
+		idfs.(token)
+	else
+		default
+);
+	
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~TF-IDF_WEIGHTS~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+countTokensTfIdfFromTf = fn(schema [ * ] tokens, schema { * } idfs = null)
+	tokens -> updateTokensWeights(fn(tokens, token) token.weight * idfOrDefault(idfs, token.token));
+
+countTfIdfFromTf = fn(tokenizedText, schema { * } idfs = null)
+	tokenizedText -> updateTokenizedText(fn(tokens) tokens -> countTokensTfIdfFromTf(idfs));
+
+countTokensTfIdf = fn(schema [ * ] tokens, schema { * } idfs = null, schema function tfFunc = tfNormal)
+	tokens -> updateTokensWeights(fn(tokens, token) tfFunc(token.count, tokens -> transform token.count) * idfOrDefault(idfs, token.token));
+
+countTfIdf = fn(tokenizedText, schema { * } idfs = null, schema function tfFunc = tfNormal)
+	tokenizedText -> updateTokenizedText(fn(tokens) tokens -> countTokensTfIdf(idfs, tfFunc));
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~HYBRID_SIMILARITIES~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+mongeElkanSim = fn(schema [ * ] lhs, schema [ * ] rhs, schema function simFunc = jaroWinklerSim)
+	sum(lhs -> transform each left max(rhs -> transform each right simFunc(left.token, right.token))) / count(lhs);
+
+minLengthMongeElkanSim = fn(schema [ * ] lhs, schema [ * ] rhs, schema function simFunc = jaroWinklerSim)
+(
+	if (count(lhs) < count(rhs))
+		mongeElkanSim(lhs, rhs)
+	else
+		mongeElkanSim(rhs, lhs)
+);
+
+maxLengthMongeElkanSim = fn(schema [ * ] lhs, schema [ * ] rhs, schema function simFunc = jaroWinklerSim)
+(
+	if (count(lhs) > count(rhs))
+		mongeElkanSim(lhs, rhs)
+	else
+		mongeElkanSim(rhs, lhs)
+);
+
+softTfIdf = fn(schema [ * ] lhs, schema [ * ] rhs, schema function simFunc = jaroWinklerSim, threshold = 0.8, schema boolean normalized = false)
+(
+	vectorFunc = fn(lhs, rhs)
+		lhs -> filter each left (rhs -> extensions::matchAny(fn(x) simFunc(left.token, x.token) > threshold))
+			-> transform each left (right = rhs -> argmax(fn(x) simFunc(left.token, x.token)), left.weight * right.weight * simFunc(left.token, right.token)),
+	generalizedCosineSim(lhs, rhs, vectorFunc, normalized)
+);

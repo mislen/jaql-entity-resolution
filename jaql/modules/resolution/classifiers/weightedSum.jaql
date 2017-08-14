@@ -1,0 +1,18 @@
+import classifiers;
+
+_createArguments = fn(schema { * } weights, schema double threshold)
+	{ weights, threshold };
+
+_classifierWithArguments = fn(schema { * } comparisonVector, schema { weights: { * }, threshold: double } parameters)
+(
+	scoreNames = comparisonVector -> names(),
+	weightNorm = scoreNames -> transform each name parameters.weights.(name) -> sum(),
+	totalWeight = scoreNames -> transform each name comparisonVector.(name) * parameters.weights.(name) / weightNorm -> sum(),
+	classifiers::_booleanClassifierResult(totalWeight > parameters.threshold)
+);
+
+classifier = fn(schema { * } comparisonVector, schema { * } weights, schema double threshold)
+	comparisonVector -> _classifierWithArguments(_createArguments(weights, threshold));
+
+createInfo = fn(schema { * } weights, schema double threshold)
+	classifiers::createInfo(_classifierWithArguments, _createArguments(weights, threshold));

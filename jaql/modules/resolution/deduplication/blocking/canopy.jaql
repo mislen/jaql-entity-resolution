@@ -1,0 +1,17 @@
+import canopyClustering;
+import resolution::deduplication::blocking;
+
+_createArguments = fn(schema function distanceFunction, schema double tightThreshold, schema double looseThreshold)
+	{ distanceFunction, tightThreshold, looseThreshold };
+
+_blockingWithArguments = fn(schema [ * ] data, schema { distanceFunction: function, tightThreshold: double, looseThreshold: double } parameters)
+	data
+		-> canopyClustering::assignCanopies(parameters.distanceFunction, parameters.looseThreshold, parameters.tightThreshold)
+		-> expand unroll $.canopies
+		-> group by $.canopies into ($ -> transform $.entity -> distinct());
+
+blocking = fn(schema [ * ] data, schema function distanceFunction, schema double tightThreshold, schema double looseThreshold)
+	data -> _blockingWithArguments(_createArguments(distanceFunction, tightThreshold, looseThreshold));
+
+createInfo = fn(schema function distanceFunction, schema double tightThreshold, schema double looseThreshold)
+	blocking::createInfo(_blockingWithArguments, _createArguments(distanceFunction, tightThreshold, looseThreshold));

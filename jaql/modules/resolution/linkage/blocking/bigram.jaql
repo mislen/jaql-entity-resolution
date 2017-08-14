@@ -1,0 +1,16 @@
+import resolution::blocking::bigram;
+import resolution::linkage::blocking;
+
+_createArguments = bigram::_createArguments;
+
+_blockingWithArguments = fn(schema [ * ] leftData, schema [ * ] rightData, schema { keyFunction: function, threshold: double } leftParameters, schema { keyFunction: function, threshold: double } rightParameters)
+	blocking::_commonBlocking(leftData, rightData, bigram::_blockingWithArguments, leftParameters, rightParameters) -> distinct();
+
+blocking = fn(schema [ * ] leftData, schema [ * ] rightData, schema function leftKeyFunction, schema double leftThreshold, schema function rightKeyFunction, schema double rightThreshold)
+	_blockingWithArguments(leftData, rightData, _createArguments(leftKeyFunction, leftThreshold), _createArguments(rightKeyFunction, rightThreshold));
+
+createInfo = fn(schema function leftKeyFunction, schema double leftThreshold, schema function rightKeyFunction, schema double rightThreshold)
+	blocking::createInfo(_blockingWithArguments, _createArguments(leftKeyFunction, leftThreshold), _createArguments(rightKeyFunction, rightThreshold));
+
+createInfoWithEqualArguments = fn(schema function keyFunction, schema double threshold)
+	blocking::createInfoWithEqualArguments(_blockingWithArguments, _createArguments(keyFunction, threshold));

@@ -1,0 +1,12 @@
+createInfo = fn(schema function method, schema { * } leftArguments, schema { * } rightArguments)
+	{ method, leftArguments, rightArguments };
+
+createInfoWithEqualArguments = fn(schema function method, schema { * } arguments)
+	createInfo(method, arguments, arguments);
+
+_commonBlocking = fn(schema [ * ] leftData, schema [ * ] rightData, schema function method, schema { * } leftParameters, schema { * } rightParameters)
+(
+	leftData = leftData -> method(leftParameters),
+	rightData = rightData -> method(rightParameters),
+	join left in leftData, right in rightData where left.key == right.key into { leftRecords: left.records, rightRecords: right.records }
+);

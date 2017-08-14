@@ -1,0 +1,61 @@
+// JAQL Module
+//----------------
+
+import extensions;
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~GET_CANOPY_CENTERS~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+localGetCanopyCenters = fn(schema [ * ] entities, schema function distanceFunction, threshold)
+(
+	canopyCombiner = fn(schema [ * ] canopies, entity)
+		canopies -> union
+		(
+			if (canopies -> extensions::matchNone(fn(x) distanceFunction(x, entity) < threshold))
+			//if (canopies -> extensions::matchNone(fn(x) extensions::vectorLess(distanceFunction(x, entity), threshold)))
+				[ entity ]
+		),
+	entities -> extensions::randomPermutation() -> extensions::combine(canopyCombiner, [])
+);
+
+mrGetCanopyCenters = fn(inputDescriptor, schema function distanceFunction, threshold, outputDescriptor = HadoopTemp())
+	mapReduce
+	(
+		{
+			name: "canopy_centers",
+			input: inputDescriptor,
+			map:
+				fn(schema [ * ] entities) entities -> localGetCanopyCenters(distanceFunction, threshold) -> transform [ null, $ ],
+			reduce:
+				fn(unused, schema [ * ] canopies) canopies -> localGetCanopyCenters(distanceFunction, threshold * 0.5),
+			output: outputDescriptor
+		}
+	);
+
+getCanopyCentersDescriptor = fn(schema [ * ] entities, schema function distanceFunction, threshold)
+	entities -> localWrite(HadoopTemp()) -> mrGetCanopyCenters(distanceFunction, threshold);
+
+getCanopyCenters = fn(schema [ * ] entities, schema function distanceFunction, threshold)
+	entities -> getCanopyCentersDescriptor(distanceFunction, threshold) -> read();
+
+//~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ASSIGN_CANOPIES~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+assignKnownCanopies = fn(schema [ * ] entities, schema [ * ] canopies, schema function distanceFunction, threshold)
+	entities -> transform each entity { entity, canopies: canopies -> filter each canopy distanceFunction(canopy, entity) < threshold };
+
+mrAssignCanopiesWithDifferentMetrics = fn(inputDescriptor, schema function firstDistanceFunction, firstThreshold, schema function secondDistanceFunction, secondThreshold)
+(
+	canopies = inputDescriptor -> mrGetCanopyCenters(secondDistanceFunction, secondThreshold),
+	read(inputDescriptor) -> assignKnownCanopies(read(canopies), firstDistanceFunction, firstThreshold)
+);
+
+assignCanopiesWithDifferentMetrics = fn(schema [ * ] entities, schema function firstDistanceFunction, firstThreshold, schema function secondDistanceFunction, secondThreshold)
+(
+	canopies = entities -> getCanopyCentersDescriptor(secondDistanceFunction, secondThreshold),
+	entities -> assignKnownCanopies(localRead(canopies), firstDistanceFunction, firstThreshold)
+);
+
+mrAssignCanopies = fn(inputDescriptor, schema function distanceFunction, firstThreshold, secondThreshold)
+	inputDescriptor -> mrAssignCanopiesWithDifferentMetrics(distanceFunction, firstThreshold, distanceFunction, secondThreshold);
+
+assignCanopies = fn(schema [ * ] entities, schema function distanceFunction, firstThreshold, secondThreshold)
+	entities -> assignCanopiesWithDifferentMetrics(distanceFunction, firstThreshold, distanceFunction, secondThreshold);

@@ -1,0 +1,25 @@
+import resolution;
+
+// Pairs
+
+_commonGeneratePairs = fn(schema [ * ] data)
+	data -> expand each left (data -> filter each right right != left -> transform each right ([ left, right ] -> sort by [ $ ]));
+
+generatePairs = fn(schema [ * ] data)
+	data -> _commonGeneratePairs() -> distinct();
+
+generatePairsFromBlocks = fn(schema [ * ] blocks)
+	blocks -> expand _commonGeneratePairs($) -> distinct();
+
+generatePairsWithBlocking = fn(schema [ * ] data, schema { method: function, arguments: { * } } blockingInfo)
+	data -> (blockingInfo.method)(blockingInfo.arguments) -> generatePairsFromBlocks();
+
+// Deduplication
+
+deduplicate = fn(schema [ * ] data, schema [ function * ] recordComparator, schema { classifier: function, arguments: { * } } classifierInfo)
+	generatePairs(data)
+		-> resolution::_getMatchedPairs(recordComparator, classifierInfo);
+
+deduplicateWithBlocking = fn(schema [ * ] data, schema { method: function, arguments: { * } } blockingInfo, schema [ function * ] recordComparator, schema { classifier: function, arguments: { * } } classifierInfo)
+	generatePairsWithBlocking(data, blockingInfo)
+		-> resolution::_getMatchedPairs(recordComparator, classifierInfo);

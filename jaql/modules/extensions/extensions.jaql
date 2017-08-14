@@ -1,0 +1,58 @@
+// JAQL Module
+//----------------
+
+addClassPath("lib/extensions.jar");
+
+combine = builtin("ederigo.jaql.lang.expr.agg.GeneralizedCombineExpr$Descriptor");
+
+transliterate = javaudf("ederigo.jaql.extensions.Transliteration");
+
+randomPermutation = javaudf("ederigo.jaql.extensions.RandomPermutation");
+
+matchAny = fn(schema [ * ] array, schema function exprFunc)
+	array -> filter exprFunc($) -> exists();
+
+matchNone = fn(schema [ * ] array, schema function exprFunc)
+	not (array -> matchAny(exprFunc));
+
+matchAll = fn(schema [ * ] array, schema function exprFunc)
+	array -> matchNone(fn(x) not exprFunc(x));
+
+setDifference = fn(schema [ * ] lhs, schema [ * ] rhs)
+	join preserve lhs, rhs where lhs == rhs into if (isnull rhs) lhs -> denull();
+
+setIntersection = fn(schema [ * ] lhs, schema [ * ] rhs)
+	join lhs, rhs where lhs == rhs into lhs;
+
+setUnion = fn(schema [ * ] lhs, schema [ * ] rhs)
+	join preserve lhs, preserve rhs where lhs == rhs into if (isnull rhs) lhs else rhs;
+
+combination = fn(schema double num)
+	if (num > 1.0)
+		num * (num - 1.0) / 2.0
+	else
+		0.0;
+
+vectorRelation = fn(lhs, rhs, relativeFunc)
+	([ toArray(lhs), toArray(rhs) -> transform -$ ] -> vectorSum() -> matchAll(relativeFunc));
+
+vectorLess = fn(lhs, rhs)
+	vectorRelation(lhs, rhs, fn(x) x < 0);
+	
+vectorLessOrEqual = fn(lhs, rhs)
+	vectorRelation(lhs, rhs, fn(x) x <= 0);
+
+jsonInOptions = { format: "org.apache.hadoop.mapred.TextInputFormat", converter: "com.ibm.jaql.io.hadoop.converter.FromJsonTextConverter" };
+jsonOutOptions = { format: "org.apache.hadoop.mapred.TextOutputFormat", converter: "com.ibm.jaql.io.hadoop.converter.ToJsonTextConverter" };
+
+jsonHdfs = fn(schema string location)
+	hdfs(location, inoptions = jsonInOptions, outoptions = jsonOutOptions);
+
+writeRecord = fn(record, descriptor)
+	record -> toArray() -> write(descriptor);
+
+readRecord = fn(descriptor)
+	singleton(read(descriptor));
+
+elapsedTime = fn(schema any result)
+	{ result } -> remap({ seconds: (dateMillis(now()) - dateMillis(const(now()))) / 1000.0 });

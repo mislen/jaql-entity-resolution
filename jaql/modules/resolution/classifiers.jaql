@@ -1,0 +1,8 @@
+matched = "Matched";
+unmatched = "Unmatched";
+
+createInfo = fn(schema function classifier, schema { * } arguments)
+	{ classifier, arguments };
+
+_booleanClassifierResult = fn(schema boolean result)
+	if (result) matched else unmatched;

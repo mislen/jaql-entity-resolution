@@ -1,0 +1,13 @@
+import resolution::blocking::bigram;
+import resolution::deduplication::blocking;
+
+_createArguments = bigram::_createArguments;
+
+_blockingWithArguments = fn(schema [ * ] data, schema { keyFunction: function, threshold: double } parameters)
+	data -> blocking::_commonBlocking(bigram::_blockingWithArguments, parameters) -> distinct();
+
+blocking = fn(schema [ * ] data, schema function keyFunction, schema double threshold)
+	data -> _blockingWithArguments(_createArguments(keyFunction, threshold));
+
+createInfo = fn(schema function keyFunction, schema double threshold)
+	blocking::createInfo(_blockingWithArguments, _createArguments(keyFunction, threshold));

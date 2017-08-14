@@ -1,0 +1,16 @@
+import resolution::blocking::simple;
+import resolution::linkage::blocking;
+
+_createArguments = simple::_createArguments;
+
+_blockingWithArguments = fn(schema [ * ] leftData, schema [ * ] rightData, schema { keyFunction: function } leftParameters, schema { keyFunction: function } rightParameters)
+	blocking::_commonBlocking(leftData, rightData, simple::_blockingWithArguments, leftParameters, rightParameters);
+
+blocking = fn(schema [ * ] leftData, schema [ * ] rightData, schema function leftKeyFunction, schema function rightKeyFunction)
+	_blockingWithArguments(leftData, rightData, _createArguments(leftKeyFunction), _createArguments(rightKeyFunction));
+
+createInfo = fn(schema function leftKeyFunction, schema function rightKeyFunction)
+	blocking::createInfo(_blockingWithArguments, _createArguments(leftKeyFunction), _createArguments(rightKeyFunction));
+
+createInfoWithEqualArguments = fn(schema function keyFunction)
+	blocking::createInfoWithEqualArguments(_blockingWithArguments, _createArguments(keyFunction));

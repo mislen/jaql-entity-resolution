@@ -1,0 +1,42 @@
+import extensions;
+import resolution::classifiers;
+
+// Comparison Vectors
+
+_evalFieldComparator = javaudf("ederigo.jaql.resolution.EvalFieldComparator");
+
+countVector = fn(schema { * } recordComparator, pair)
+	recordComparator -> fields() -> transform { ($[0]): _evalFieldComparator($[1], pair[0], pair[1]) } -> record();
+
+generateVectors = fn(schema [ * ] pairs, schema { * } recordComparator)
+	pairs -> transform each pair { pair, comparisonVector: countVector(recordComparator, pair) };
+
+// Matches
+
+generateMatches = fn(schema [ * ] pairsWithVectors, schema { classifier: function, arguments: { * } } classifierInfo)
+	pairsWithVectors -> transform { $.*, status: $.comparisonVector -> (classifierInfo.classifier)(classifierInfo.arguments) };
+
+generateVectorsAndMatches = fn(schema [ * ] pairs, schema { * } recordComparator, schema { classifier: function, arguments: { * } } classifierInfo)
+	pairs -> transform each pair (comparisonVector = countVector(recordComparator, pair), { pair, comparisonVector, status: comparisonVector -> (classifierInfo.classifier)(classifierInfo.arguments) });
+
+filterMatchedPairs = fn(schema [ * ] pairs)
+	pairs -> filter $.status != classifiers::unmatched;
+
+_getMatchedPairs = fn(schema [ * ] pairs, schema { * } recordComparator, schema { classifier: function, arguments: { * } } classifierInfo)
+	pairs
+		-> generateVectorsAndMatches(recordComparator, classifierInfo)
+		-> filterMatchedPairs();
+
+// Evaluation
+
+evaluateResults = fn(schema [ * ] predictedPairs, schema [ * ] truePairs, schema double beta = 1.0)
+(
+	predictionPositive = count(predictedPairs),
+	conditionPositive = count(truePairs),
+	truePositive = extensions::setIntersection(truePairs -> transform ($ -> sort by [ $ ]), predictedPairs) -> count() -> to_double(),
+	precision = truePositive / predictionPositive,
+	recall = truePositive / conditionPositive,
+	betaSqr = beta -> power(2.0),
+	fScore = (betaSqr + 1.0) * precision * recall / (betaSqr * precision + recall),
+	{ truePositive, falsePositive: predictionPositive - truePositive, falseNegative: conditionPositive - truePositive, precision, recall, fScore }
+);

@@ -1,0 +1,17 @@
+import classifiers;
+
+parseRules = javaudf("ederigo.jaql.resolution.ParseRules");
+
+_evalRules = javaudf("ederigo.jaql.resolution.EvalRules");
+
+_createArguments = fn(schema { lhs, op, rhs } rules)
+	{ rules };
+
+_classifierWithArguments = fn(schema { * } comparisonVector, schema { rules: { lhs, op, rhs } } parameters)
+	classifiers::_booleanClassifierResult(comparisonVector -> _evalRules(parameters.rules));
+
+classifier = fn(schema { * } comparisonVector, schema { lhs, op, rhs } rules)
+	comparisonVector -> _classifierWithArguments(_createArguments(rules));
+
+createInfo = fn(schema { lhs, op, rhs } rules)
+	classifiers::createInfo(_classifierWithArguments, _createArguments(rules));

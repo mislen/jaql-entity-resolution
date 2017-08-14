@@ -1,0 +1,25 @@
+import resolution;
+
+// Pairs
+
+_commonGeneratePairs = fn(schema [ * ] leftData, schema [ * ] rightData)
+	leftData -> expand each left (rightData -> transform each right ([ left, right ] -> sort by [ $ ]));
+
+generatePairs = fn(schema [ * ] leftData, schema [ * ] rightData)
+	_commonGeneratePairs(leftData, rightData) -> distinct();
+
+generatePairsFromBlocks = fn(schema [ * ] blocks)
+	blocks -> expand _commonGeneratePairs($.leftRecords, $.rightRecords) -> distinct();
+
+generatePairsWithBlocking = fn(schema [ * ] leftData, schema [ * ] rightData, schema { method: function, leftArguments: { * }, rightArguments: { * } } blockingInfo)
+	(blockingInfo.method)(leftData, rightData, blockingInfo.leftArguments, blockingInfo.rightArguments) -> generatePairsFromBlocks();
+
+// Linkage
+
+link = fn(schema [ * ] leftData, schema [ * ] rightData, schema [ function * ] recordComparator, schema { classifier: function, arguments: { * } } classifierInfo)
+	generatePairs(leftData, rightData)
+		-> resolution::_getMatchedPairs(recordComparator, classifierInfo);
+
+linkWithBlocking = fn(schema [ * ] leftData, schema [ * ] rightData, schema { method: function, leftArguments: { * }, rightArguments: { * } } blockingInfo, schema [ function * ] recordComparator, schema { classifier: function, arguments: { * } } classifierInfo)
+	generatePairsWithBlocking(leftData, rightData, blockingInfo)
+		-> resolution::_getMatchedPairs(recordComparator, classifierInfo);

@@ -1,0 +1,19 @@
+import similarity;
+
+_createArguments = fn(schema function keyFunction, schema double threshold)
+	{ keyFunction, threshold };
+
+_getBigramSublists = fn(schema string data, schema double threshold)
+(
+	list = data -> similarity::nGramSplit(2, false, false) -> distinct() -> sort by [ $ ],
+	list -> powerset() -> filter count($) == max([ to_long(count(list) * threshold), 1 ]) -> transform strJoin($, "")
+);
+
+_blockingWithArguments = fn(schema [ * ] data, schema { keyFunction: function, threshold: double } parameters)
+	data
+		-> transform { sublists: _getBigramSublists((parameters.keyFunction)($), parameters.threshold), record: $ }
+		-> expand unroll $.sublists
+		-> group by key = $.sublists into { key, records: $ -> transform $.record -> sort by [ $ ] };
+
+blocking = fn(schema [ * ] data, schema function keyFunction, schema double threshold)
+	data -> _blockingWithArguments(_createArguments(keyFunction, threshold));

@@ -1,0 +1,13 @@
+import resolution::blocking::simple;
+import resolution::deduplication::blocking;
+
+_createArguments = simple::_createArguments;
+
+_blockingWithArguments = fn(schema [ * ] data, schema { keyFunction: function } parameters)
+	data -> blocking::_commonBlocking(simple::_blockingWithArguments, parameters);
+
+blocking = fn(schema [ * ] data, schema function keyFunction)
+	data -> _blockingWithArguments(_createArguments(keyFunction));
+
+createInfo = fn(schema function keyFunction)
+	blocking::createInfo(_blockingWithArguments, _createArguments(keyFunction));
